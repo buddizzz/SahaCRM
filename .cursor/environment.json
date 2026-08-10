@@ -1,15 +1,11 @@
 {
-  "name": "SahaCRM",
+  "name": "Saha CRM",
   "install": "npm ci",
   "terminals": [
     {
-      "name": "server",
-      "command": "npm run dev:server"
-    },
-    {
-      "name": "client",
-      "command": "npm run dev:client"
+      "name": "dev",
+      "command": "npm run dev"
     }
   ],
-  "ports": [4000, 5173]
+  "ports": [5173]
 }

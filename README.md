@@ -1,65 +1,68 @@
-# SahaCRM
+# صحة CRM (Saha CRM)
 
-A lightweight customer relationship management (CRM) app. Track customers,
-their contact details, status in your pipeline, and notes.
+أداة متابعة المراجعين لموظفي الصحة في السعودية. يرفع الموظف ملفات المراجعين
+(طب الأسرة والتطعيم) بصيغة Excel، فيعرض الموقع بيانات كل مراجع، ويتيح الاتصال
+به بضغطة زر عبر تطبيق خارجي، وتصنيف نتيجة المكالمة، ثم تصدير تقرير PDF.
 
-- **Client** — React + Vite + TypeScript single-page app (`client/`)
-- **Server** — Express + TypeScript REST API backed by SQLite (`server/`)
+A client-side follow-up tool for Saudi health staff. The employee uploads
+patient Excel files (family medicine + vaccination); the app displays each
+record, enables one-tap calling via an external dialer, lets the employee
+classify the call outcome, and exports a PDF report.
 
-The project is an npm workspaces monorepo, so a single `npm install` at the
-root installs both packages. No external database server is required — data is
-stored in a local SQLite file (`server/data/sahacrm.sqlite`), created and
-seeded automatically on first run.
+## الخصوصية / Privacy
 
-## Prerequisites
+- **لا يتم حفظ أي بيانات على أي خادم** — تتم كل المعالجة داخل المتصفح.
+- **بدون تسجيل دخول.**
+- تُحفظ الجلسة في `sessionStorage` فقط، وتُمسح تلقائيًا عند إغلاق المتصفح.
+- No backend, no database, no login. All processing happens in the browser and
+  data lives only in `sessionStorage` (cleared when the browser/tab closes).
 
-- Node.js >= 20 (developed on Node 22)
-- npm >= 10
+## المزايا / Features
 
-## Getting started
+- رفع ملفين Excel: طب الأسرة والتطعيم (يتعرف على الأعمدة العربية تلقائيًا).
+- عرض: اسم المراجع، رقم الهوية، موعد ووقت الحجز، اسم الطبيب، التخصص، رقم الاتصال.
+- زر اتصال يفتح التطبيق الخارجي (الافتراضي `tel:`؛ قابل للتخصيص لـ Zain Calls Pro).
+- تصنيف كل مكالمة: 🔴 لم يرد / 🟡 غير راضٍ / 🟢 راضٍ.
+- تصدير تقرير PDF بأسماء المراجعين وأرقام هوياتهم وتصنيفاتهم الملونة.
+- واجهة عربية (RTL).
+
+## التقنيات / Tech stack
+
+React + TypeScript + Vite · SheetJS (`xlsx`) لقراءة Excel · `jsPDF` + `html2canvas`
+لتصدير PDF. تطبيق ثابت بالكامل قابل للنشر على GitHub Pages.
+
+## التشغيل محليًا / Run locally
 
 ```bash
-npm install        # install both workspaces
-npm run dev        # start API (:4000) and client (:5173) together
+npm install
+npm run dev          # http://localhost:5173
 ```
 
-Then open http://localhost:5173. The Vite dev server proxies `/api/*` requests
-to the backend on port 4000, so no extra configuration is needed.
+توليد ملفات Excel تجريبية للتجربة / generate sample Excel files:
 
-## Useful scripts (run from the repo root)
+```bash
+npm run gen:samples  # -> samples/family-medicine.xlsx, samples/vaccination.xlsx
+```
+
+سكربتات أخرى / other scripts:
 
 | Command | Description |
 | --- | --- |
-| `npm run dev` | Run the API and client together (hot reload) |
-| `npm run dev:server` | Run only the API on port 4000 |
-| `npm run dev:client` | Run only the Vite client on port 5173 |
-| `npm run build` | Type-check and build both workspaces |
-| `npm run typecheck` | Type-check both workspaces |
-| `npm test` | Run the server API test suite |
+| `npm run build` | Type-check and build the static site into `dist/` |
+| `npm run preview` | Preview the production build |
+| `npm run typecheck` | Type-check only |
 
-## API overview
+## النشر على GitHub Pages / Deploy to GitHub Pages
 
-Base URL: `http://localhost:4000`
+يتضمن المستودع سير عمل GitHub Actions (`.github/workflows/deploy.yml`) ينشر
+الموقع تلقائيًا عند الدفع إلى `main`.
 
-| Method | Path | Description |
-| --- | --- | --- |
-| GET | `/api/health` | Service health check |
-| GET | `/api/stats` | Aggregate customer counts and pipeline |
-| GET | `/api/customers?q=` | List / search customers |
-| GET | `/api/customers/:id` | Fetch a single customer |
-| POST | `/api/customers` | Create a customer (`name` required) |
-| PUT | `/api/customers/:id` | Update a customer |
-| DELETE | `/api/customers/:id` | Delete a customer |
+1. في إعدادات المستودع: **Settings → Pages → Build and deployment → Source: GitHub Actions**.
+2. ادفع إلى `main`؛ سيبني السير العمل الموقع وينشره.
+3. يُضبط `base` تلقائيًا على اسم المستودع (`/<repo>/`). لنطاق مخصص عيّن `VITE_BASE`.
 
-## Configuration
+## الاتصال عبر Zain Calls Pro
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `4000` | Port the API server listens on |
-| `SAHACRM_DB_PATH` | `server/data/sahacrm.sqlite` | SQLite database file path |
-
-## Cloud Agent environment
-
-`.cursor/environment.json` configures the Cursor Cloud Agent environment:
-`npm ci` installs dependencies, and two terminals run the API and client dev
-servers on ports 4000 and 5173.
+زر الاتصال يستخدم `tel:` افتراضيًا، وهو ما يفتح تطبيق الاتصال على iOS. لتوجيه
+المكالمات إلى Zain Calls Pro، يمكن تعيينه كتطبيق الاتصال الافتراضي على الجهاز،
+أو إدخال رابط مخصص للتطبيق من زر الإعدادات (⚙︎) داخل الموقع.
