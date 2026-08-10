@@ -11,6 +11,7 @@ function normalize(input: string): string {
     .replace(/[\u064B-\u0652\u0640]/g, "") // tashkeel + tatweel
     .replace(/[أإآ]/g, "ا")
     .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
     .replace(/ؤ/g, "و")
     .replace(/ئ/g, "ي")
     .replace(/\s+/g, "")
@@ -18,25 +19,61 @@ function normalize(input: string): string {
     .trim();
 }
 
-// Checked in priority order so more specific headers win
-// (e.g. "اسم الطبيب" maps to doctor, not name).
+// Strong, specific keywords checked in priority order. The patient-name field
+// intentionally does NOT match the bare word "اسم" here, because many columns
+// contain it (اسم المديرية، اسم المركز، اسم الطبيب، اسم التخصص). Those are
+// resolved by their own strong keywords or excluded from the name fallback.
 const FIELD_KEYWORDS: Array<[Field, string[]]> = [
-  ["nationalId", ["هوية", "الهويه", "nationalid", "id"]],
-  ["specialty", ["تخصص", "specialty", "speciality"]],
-  ["doctor", ["طبيب", "دكتور", "doctor", "physician"]],
-  ["phone", ["اتصال", "جوال", "هاتف", "تواصل", "phone", "mobile", "tel", "contact"]],
-  ["appointmentTime", ["وقت", "ساعه", "الساعه", "زمن", "time"]],
-  ["appointmentDate", ["تاريخ", "موعد", "الحجز", "date", "appointment"]],
-  ["name", ["مراجع", "الاسم", "اسم", "name", "patient"]],
+  ["nationalId", ["الهويه", "هويه", "السجلالمدني", "الرقمالمدني", "الاقامه", "nationalid", "identity", "iqama"]],
+  ["specialty", ["التخصص", "تخصص", "العياده", "عياده", "specialty", "speciality", "clinic"]],
+  ["doctor", ["الطبيب", "طبيب", "دكتور", "المعالج", "الممارس", "doctor", "physician"]],
+  ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
+  ["appointmentTime", ["الوقت", "وقت", "الساعه", "ساعه", "زمن", "time"]],
+  ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
+  ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
 
-function matchField(header: string): Field | null {
-  const h = normalize(header);
-  if (!h) return null;
+// Generic name tokens used only as a last resort, guarded by exclusions so a
+// column like "اسم المديرية" is never mistaken for the patient name.
+const NAME_FALLBACK = ["الاسمالرباعي", "الاسمالكامل", "الاسم", "اسم", "fullname", "name"];
+const NAME_EXCLUDE = [
+  "مديريه", "مركز", "قطاع", "مستشفى", "مستشفي", "خدمه", "نوع", "الجهه", "الاداره",
+  "القسم", "الملف", "المشروع", "الطبيب", "التخصص", "العياده", "الشركه",
+];
+
+export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
+  const map: Partial<Record<Field, string>> = {};
+  const used = new Set<string>();
+
   for (const [field, keywords] of FIELD_KEYWORDS) {
-    if (keywords.some((kw) => h.includes(normalize(kw)))) return field;
+    const normalized = keywords.map(normalize);
+    for (const header of headers) {
+      if (used.has(header) || map[field]) continue;
+      const h = normalize(header);
+      if (h && normalized.some((kw) => h.includes(kw))) {
+        map[field] = header;
+        used.add(header);
+        break;
+      }
+    }
   }
-  return null;
+
+  if (!map.name) {
+    const fallback = NAME_FALLBACK.map(normalize);
+    const exclude = NAME_EXCLUDE.map(normalize);
+    for (const header of headers) {
+      if (used.has(header)) continue;
+      const h = normalize(header);
+      if (!h) continue;
+      if (fallback.some((kw) => h.includes(kw)) && !exclude.some((ex) => h.includes(ex))) {
+        map.name = header;
+        used.add(header);
+        break;
+      }
+    }
+  }
+
+  return map;
 }
 
 function cell(value: unknown): string {
@@ -63,11 +100,7 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
 
   // Map each spreadsheet column header to one of our fields.
   const headers = Object.keys(rows[0]);
-  const columnMap: Partial<Record<Field, string>> = {};
-  for (const header of headers) {
-    const field = matchField(header);
-    if (field && !columnMap[field]) columnMap[field] = header;
-  }
+  const columnMap = mapColumns(headers);
 
   const records: PatientRecord[] = [];
   for (const row of rows) {
