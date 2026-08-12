@@ -16,7 +16,12 @@ export function loadRecords(): PatientRecord[] {
     const parsed = JSON.parse(raw) as PatientRecord[];
     if (!Array.isArray(parsed)) return [];
     // Re-normalise phones so numbers already in the session as 9665… show as 05…
-    return parsed.map((r) => ({ ...r, phone: normalizePhone(r.phone ?? "") }));
+    // Default missing arrivalDate for sessions saved before that field existed.
+    return parsed.map((r) => ({
+      ...r,
+      phone: normalizePhone(r.phone ?? ""),
+      arrivalDate: r.arrivalDate ?? "",
+    }));
   } catch {
     return [];
   }

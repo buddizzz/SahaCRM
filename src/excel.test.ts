@@ -9,7 +9,8 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
     "اسم المراجع",
     "رقم الهوية",
     "موعد الحجز",
-    "وقت الحجز",
+    "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
     "اسم الطبيب",
     "اسم التخصص",
     "رقم الجوال",
@@ -18,7 +19,8 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
   assert.equal(map.name, "اسم المراجع");
   assert.equal(map.nationalId, "رقم الهوية");
   assert.equal(map.appointmentDate, "موعد الحجز");
-  assert.equal(map.appointmentTime, "وقت الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+  assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
   assert.equal(map.doctor, "اسم الطبيب");
   assert.equal(map.specialty, "اسم التخصص");
   assert.equal(map.phone, "رقم الجوال");
@@ -49,6 +51,25 @@ test("time is not misread as the appointment date", () => {
   const map = mapColumns(["تاريخ الموعد", "وقت الموعد"]);
   assert.equal(map.appointmentDate, "تاريخ الموعد");
   assert.equal(map.appointmentTime, "وقت الموعد");
+});
+
+test("arrival date is not mistaken for appointment date or patient name", () => {
+  const map = mapColumns([
+    "اسم المراجع",
+    "موعد الحجز",
+    "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
+  ]);
+  assert.equal(map.name, "اسم المراجع");
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+  assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
+});
+
+test("legacy وقت الحجز still maps to appointment time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت الحجز");
 });
 
 test("English headers also map", () => {
