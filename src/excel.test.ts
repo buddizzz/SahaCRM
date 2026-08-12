@@ -20,6 +20,7 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
   assert.equal(map.name, "اسم المراجع");
   assert.equal(map.nationalId, "رقم الهوية");
   assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
   assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
   assert.equal(map.doctor, "اسم الطبيب");
   assert.equal(map.specialty, "اسم التخصص");
@@ -47,9 +48,10 @@ test("handles diacritics, alef and ta-marbuta variations", () => {
   assert.equal(map.phone, "الجوّال");
 });
 
-test("time columns are not misread as the appointment date", () => {
-  const map = mapColumns(["تاريخ الموعد", "وقت بداية الموعد", "وقت الحجز"]);
+test("time is not misread as the appointment date", () => {
+  const map = mapColumns(["تاريخ الموعد", "وقت بداية الموعد"]);
   assert.equal(map.appointmentDate, "تاريخ الموعد");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
 });
 
 test("arrival date is not mistaken for appointment date or patient name", () => {
@@ -61,7 +63,41 @@ test("arrival date is not mistaken for appointment date or patient name", () => 
   ]);
   assert.equal(map.name, "اسم المراجع");
   assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
   assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
+});
+
+test("وقت الحجز is never used as appointment start time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية الموعد"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("وقت الحجز alone does not map to appointment time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, undefined);
+});
+
+test("وقت بداية موعد without ال does not fuzzy-match", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية موعد"]);
+  assert.equal(map.appointmentTime, undefined);
+});
+
+test("only exact وقت بداية الموعد maps to appointment time", () => {
+  const map = mapColumns([
+    "موعد الحجز",
+    "وقت الحجز",
+    "وقت الموعد",
+    "بداية الموعد",
+    "وقت بداية الموعد",
+  ]);
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("diacritics on exact وقت بداية الموعد still match", () => {
+  const map = mapColumns(["وقت الحجز", "وقت بِدَايَة المَوْعِد"]);
+  assert.equal(map.appointmentTime, "وقت بِدَايَة المَوْعِد");
 });
 
 test("English headers also map", () => {
@@ -82,14 +118,14 @@ test("normalizePhone converts 9665… to 05…", () => {
   assert.equal(normalizePhone(""), "");
 });
 
-test("cell formats Excel dates and time serials", () => {
+test("cell formats Excel time serials as HH:mm, not 1899 dates", () => {
   assert.equal(cell(0.3958333333, "time"), "09:30");
   const localTime = new Date(1899, 11, 31, 9, 30, 0);
   assert.equal(cell(localTime, "time"), "09:30");
   assert.equal(cell(new Date(2026, 7, 12), "date"), "2026-08-12");
 });
 
-test("parseExcelFile ignores وقت بداية الموعد and reads arrival date", async () => {
+test("parseExcelFile reads وقت بداية الموعد, not وقت الحجز", async () => {
   const headers = [
     "اسم المراجع",
     "رقم الهوية",
@@ -108,13 +144,15 @@ test("parseExcelFile ignores وقت بداية الموعد and reads arrival da
       "1012345678",
       "2026-08-12",
       "08:00",
-      "09:30",
+      null,
       "2026-08-12",
       "د. سعاد",
       "طب الأسرة",
       "0501234567",
     ],
   ]);
+  // Real MOH exports store start time as an Excel time serial.
+  ws["E2"] = { t: "n", v: 0.3958333333, z: "hh:mm" };
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "المراجعون");
   const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
@@ -123,8 +161,10 @@ test("parseExcelFile ignores وقت بداية الموعد and reads arrival da
   });
 
   const result = await parseExcelFile(file, "family");
+  assert.equal(result.matchedColumns.appointmentTime, "وقت بداية الموعد");
+  assert.notEqual(result.matchedColumns.appointmentTime, "وقت الحجز");
   assert.equal(result.records.length, 1);
-  assert.equal(result.records[0].appointmentDate, "2026-08-12");
+  assert.equal(result.records[0].appointmentTime, "09:30");
+  assert.notEqual(result.records[0].appointmentTime, "08:00");
   assert.equal(result.records[0].arrivalDate, "2026-08-12");
-  assert.equal(result.matchedColumns.arrivalDate, "تاريخ وصول المراجع");
 });
