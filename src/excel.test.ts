@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapColumns } from "./excel";
+import { mapColumns, normalizePhone } from "./excel";
 
 test("patient name maps to اسم المراجع, not اسم المديرية", () => {
   const headers = [
@@ -58,4 +58,13 @@ test("English headers also map", () => {
   assert.equal(map.phone, "Mobile");
   assert.equal(map.doctor, "Doctor");
   assert.equal(map.specialty, "Specialty");
+});
+
+test("normalizePhone converts 9665… to 05…", () => {
+  assert.equal(normalizePhone("966512345678"), "0512345678");
+  assert.equal(normalizePhone("+966512345678"), "0512345678");
+  assert.equal(normalizePhone("00966512345678"), "0512345678");
+  assert.equal(normalizePhone("966 5 1234 5678"), "0512345678");
+  assert.equal(normalizePhone("0512345678"), "0512345678");
+  assert.equal(normalizePhone(""), "");
 });

@@ -82,6 +82,27 @@ function cell(value: unknown): string {
   return String(value).trim();
 }
 
+/**
+ * Normalise Saudi mobile numbers to local form (05XXXXXXXX).
+ * Spreadsheet exports often store the international form 9665XXXXXXXX
+ * (with or without + / 00); dialling apps expect the local 05… form.
+ */
+export function normalizePhone(input: string): string {
+  if (!input) return "";
+  let digits = String(input).replace(/\D/g, "");
+  if (!digits) return String(input).trim();
+
+  // 009665… → 9665…
+  if (digits.startsWith("00966")) digits = digits.slice(2);
+
+  // 9665XXXXXXXX → 05XXXXXXXX
+  if (digits.startsWith("966") && digits.length >= 12) {
+    digits = `0${digits.slice(3)}`;
+  }
+
+  return digits;
+}
+
 export interface ParseResult {
   records: PatientRecord[];
   matchedColumns: Partial<Record<Field, string>>;
@@ -109,7 +130,7 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
       return header ? cell(row[header]) : "";
     };
     const name = get("name");
-    const phone = get("phone");
+    const phone = normalizePhone(get("phone"));
     const nationalId = get("nationalId");
     // Skip fully empty rows.
     if (!name && !phone && !nationalId) continue;

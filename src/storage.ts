@@ -1,3 +1,4 @@
+import { normalizePhone } from "./excel";
 import type { PatientRecord } from "./types";
 
 // sessionStorage is scoped to the browser tab and is automatically cleared
@@ -13,7 +14,9 @@ export function loadRecords(): PatientRecord[] {
     const raw = sessionStorage.getItem(RECORDS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as PatientRecord[];
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    // Re-normalise phones so numbers already in the session as 9665… show as 05…
+    return parsed.map((r) => ({ ...r, phone: normalizePhone(r.phone ?? "") }));
   } catch {
     return [];
   }
