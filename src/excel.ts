@@ -5,7 +5,6 @@ type Field = keyof Pick<
   | "name"
   | "nationalId"
   | "appointmentDate"
-  | "appointmentTime"
   | "arrivalDate"
   | "doctor"
   | "specialty"
@@ -29,12 +28,8 @@ export function normalize(input: string): string {
     .trim();
 }
 
-/**
- * These fields bind ONLY to the exact Excel header (after normalisation).
- * Fuzzy keyword matching must never pick "وقت الحجز" for appointment time.
- */
+/** Fields that bind ONLY to the exact Excel header (after normalisation). */
 const EXACT_HEADERS: Array<[Field, string]> = [
-  ["appointmentTime", "وقت بداية الموعد"],
   ["arrivalDate", "تاريخ وصول المراجع"],
 ];
 
@@ -42,7 +37,7 @@ const EXACT_HEADERS: Array<[Field, string]> = [
 // intentionally does NOT match the bare word "اسم" here, because many columns
 // contain it (اسم المديرية، اسم المركز، اسم الطبيب، اسم التخصص). Those are
 // resolved by their own strong keywords or excluded from the name fallback.
-// appointmentTime / arrivalDate are intentionally absent — exact match only.
+// arrivalDate is intentionally absent — exact match only.
 const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["nationalId", ["الهويه", "هويه", "السجلالمدني", "الرقمالمدني", "الاقامه", "nationalid", "identity", "iqama"]],
   ["specialty", ["التخصص", "تخصص", "العياده", "عياده", "specialty", "speciality", "clinic"]],
@@ -69,7 +64,7 @@ export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
   const map: Partial<Record<Field, string>> = {};
   const used = new Set<string>();
 
-  // 1) Exact header names first (وقت بداية الموعد, تاريخ وصول المراجع).
+  // 1) Exact header names first (تاريخ وصول المراجع).
   for (const [field, label] of EXACT_HEADERS) {
     const header = findExactHeader(headers, label);
     if (header) {
@@ -85,12 +80,10 @@ export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
       if (used.has(header) || map[field]) continue;
       const h = normalize(header);
       if (!h) continue;
-      // Do not let appointmentDate claim start-time / arrival columns.
+      // Do not let appointmentDate claim arrival or time-only columns.
       if (
         field === "appointmentDate" &&
-        (h.includes(normalize("بداية")) ||
-          h.includes(normalize("وصول")) ||
-          h.includes(normalize("وقت")))
+        (h.includes(normalize("وصول")) || h.includes(normalize("وقت")))
       ) {
         continue;
       }
@@ -201,8 +194,8 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return { records: [], matchedColumns: {}, totalRows: 0 };
 
-  // Read header row directly so we can exact-match "وقت بداية الموعد"
-  // even when the first data row is sparse.
+  // Read header row directly so exact matches work even when the first data
+  // row is sparse.
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
     header: 1,
     defval: "",
@@ -214,8 +207,7 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
   const headers = headerRow.filter((h) => h.length > 0);
   const columnMap = mapColumns(headers);
 
-  // raw:false keeps Excel's displayed values (e.g. "09:30" for time cells)
-  // instead of Date objects that would otherwise become "1899-12-31".
+  // raw:false keeps Excel's displayed values for dates/times.
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: "",
     raw: false,
@@ -227,8 +219,6 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
     const get = (field: Field, kind: "date" | "time" | "text" = "text"): string => {
       const header = columnMap[field];
       if (!header) return "";
-      // Prefer the exact mapped header key; also try a normalised key lookup
-      // in case SheetJS altered whitespace on the object key.
       if (Object.prototype.hasOwnProperty.call(row, header)) {
         return cell(row[header], kind);
       }
@@ -250,8 +240,6 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
       name,
       nationalId,
       appointmentDate: get("appointmentDate", "date"),
-      // Bound exclusively via exact header "وقت بداية الموعد" in mapColumns.
-      appointmentTime: get("appointmentTime", "time"),
       arrivalDate: get("arrivalDate", "date"),
       doctor: get("doctor"),
       specialty: get("specialty"),
