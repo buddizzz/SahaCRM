@@ -9,7 +9,7 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
     "اسم المراجع",
     "رقم الهوية",
     "موعد الحجز",
-    "وقت الحجز",
+    "وقت بداية الموعد",
     "اسم الطبيب",
     "اسم التخصص",
     "رقم الجوال",
@@ -18,7 +18,7 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
   assert.equal(map.name, "اسم المراجع");
   assert.equal(map.nationalId, "رقم الهوية");
   assert.equal(map.appointmentDate, "موعد الحجز");
-  assert.equal(map.appointmentTime, "وقت الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
   assert.equal(map.doctor, "اسم الطبيب");
   assert.equal(map.specialty, "اسم التخصص");
   assert.equal(map.phone, "رقم الجوال");
@@ -45,10 +45,24 @@ test("handles diacritics, alef and ta-marbuta variations", () => {
   assert.equal(map.phone, "الجوّال");
 });
 
-test("time is not misread as the appointment date", () => {
+test("appointment date still maps; near time headers do not steal it", () => {
   const map = mapColumns(["تاريخ الموعد", "وقت الموعد"]);
   assert.equal(map.appointmentDate, "تاريخ الموعد");
-  assert.equal(map.appointmentTime, "وقت الموعد");
+  // Time is exact-match only — "وقت الموعد" must not map.
+  assert.equal(map.appointmentTime, undefined);
+});
+
+test("appointmentTime only matches the exact header وقت بداية الموعد", () => {
+  const exact = mapColumns(["وقت بداية الموعد", "موعد الحجز"]);
+  assert.equal(exact.appointmentTime, "وقت بداية الموعد");
+
+  // Near variants and older labels must not match.
+  const near = mapColumns(["وقت الحجز", "وقت الموعد", "الوقت", "وقت", "Appointment Time", "time"]);
+  assert.equal(near.appointmentTime, undefined);
+
+  // Extra spaces / different wording must not match.
+  const spaced = mapColumns(["وقت  بداية  الموعد", "وقت بداية الموعد "]);
+  assert.equal(spaced.appointmentTime, undefined);
 });
 
 test("English headers also map", () => {

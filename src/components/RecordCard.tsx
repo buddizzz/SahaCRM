@@ -22,7 +22,7 @@ export function RecordCard({ record, callHref, onCall, onSetStatus }: Props) {
 
       <div className="record-fields">
         <Field label="موعد الحجز" value={record.appointmentDate} />
-        <Field label="وقت الحجز" value={record.appointmentTime} />
+        <Field label="وقت بداية الموعد" value={record.appointmentTime} />
         <Field label="الطبيب" value={record.doctor} />
         <Field label="التخصص" value={record.specialty} />
       </div>

@@ -19,16 +19,21 @@ function normalize(input: string): string {
     .trim();
 }
 
+// Fields that must match a header literally (no fuzzy / keyword matching).
+const EXACT_HEADERS: Partial<Record<Field, string>> = {
+  appointmentTime: "وقت بداية الموعد",
+};
+
 // Strong, specific keywords checked in priority order. The patient-name field
 // intentionally does NOT match the bare word "اسم" here, because many columns
 // contain it (اسم المديرية، اسم المركز، اسم الطبيب، اسم التخصص). Those are
 // resolved by their own strong keywords or excluded from the name fallback.
+// appointmentTime is intentionally omitted — it only maps from EXACT_HEADERS.
 const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["nationalId", ["الهويه", "هويه", "السجلالمدني", "الرقمالمدني", "الاقامه", "nationalid", "identity", "iqama"]],
   ["specialty", ["التخصص", "تخصص", "العياده", "عياده", "specialty", "speciality", "clinic"]],
   ["doctor", ["الطبيب", "طبيب", "دكتور", "المعالج", "الممارس", "doctor", "physician"]],
   ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
-  ["appointmentTime", ["الوقت", "وقت", "الساعه", "ساعه", "زمن", "time"]],
   ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
   ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
@@ -45,7 +50,19 @@ export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
   const map: Partial<Record<Field, string>> = {};
   const used = new Set<string>();
 
+  // Exact-header fields first — no normalization or partial matching.
+  for (const field of Object.keys(EXACT_HEADERS) as Field[]) {
+    const exact = EXACT_HEADERS[field];
+    if (!exact) continue;
+    const header = headers.find((h) => h === exact);
+    if (header) {
+      map[field] = header;
+      used.add(header);
+    }
+  }
+
   for (const [field, keywords] of FIELD_KEYWORDS) {
+    if (map[field]) continue;
     const normalized = keywords.map(normalize);
     for (const header of headers) {
       if (used.has(header) || map[field]) continue;
