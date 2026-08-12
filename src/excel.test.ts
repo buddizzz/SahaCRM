@@ -48,9 +48,9 @@ test("handles diacritics, alef and ta-marbuta variations", () => {
 });
 
 test("time is not misread as the appointment date", () => {
-  const map = mapColumns(["تاريخ الموعد", "وقت الموعد"]);
+  const map = mapColumns(["تاريخ الموعد", "وقت بداية الموعد"]);
   assert.equal(map.appointmentDate, "تاريخ الموعد");
-  assert.equal(map.appointmentTime, "وقت الموعد");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
 });
 
 test("arrival date is not mistaken for appointment date or patient name", () => {
@@ -66,10 +66,16 @@ test("arrival date is not mistaken for appointment date or patient name", () => 
   assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
 });
 
-test("legacy وقت الحجز still maps to appointment time", () => {
+test("وقت الحجز is never used as appointment start time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية الموعد"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("وقت الحجز alone does not map to appointment time", () => {
   const map = mapColumns(["موعد الحجز", "وقت الحجز"]);
   assert.equal(map.appointmentDate, "موعد الحجز");
-  assert.equal(map.appointmentTime, "وقت الحجز");
+  assert.equal(map.appointmentTime, undefined);
 });
 
 test("English headers also map", () => {

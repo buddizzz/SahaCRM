@@ -37,8 +37,8 @@ const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
   // Arrival must precede appointmentDate: both headers contain "تاريخ".
   ["arrivalDate", ["وصوالمراجع", "تاريخالوصول", "وقتالوصول", "الوصول", "وصول", "arrival"]],
-  // Prefer "وقت بداية الموعد" over generic booking-time labels.
-  ["appointmentTime", ["وقتبدايهالموعد", "بدايهالموعد", "الوقت", "وقت", "الساعه", "ساعه", "زمن", "time"]],
+  // Only "وقت بداية الموعد" — never the booking column "وقت الحجز".
+  ["appointmentTime", ["وقتبدايهالموعد", "بدايهالموعد"]],
   ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
   ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
