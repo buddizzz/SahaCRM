@@ -13,8 +13,11 @@ type Field = keyof Pick<
 >;
 
 /** Normalise an Arabic/English header for keyword matching. */
-function normalize(input: string): string {
+export function normalize(input: string): string {
   return String(input)
+    .replace(/^\uFEFF/, "") // BOM
+    .replace(/[\u200B-\u200D\uFEFF]/g, "") // zero-width chars
+    .replace(/[\u00A0\u202F\u2007\u2060]/g, " ") // nbsp variants → space
     .replace(/[\u064B-\u0652\u0640]/g, "") // tashkeel + tatweel
     .replace(/[أإآ]/g, "ا")
     .replace(/ى/g, "ي")
@@ -26,25 +29,28 @@ function normalize(input: string): string {
     .trim();
 }
 
+/**
+ * These fields bind ONLY to the exact Excel header (after normalisation).
+ * Fuzzy keyword matching must never pick "وقت الحجز" for appointment time.
+ */
+const EXACT_HEADERS: Array<[Field, string]> = [
+  ["appointmentTime", "وقت بداية الموعد"],
+  ["arrivalDate", "تاريخ وصول المراجع"],
+];
+
 // Strong, specific keywords checked in priority order. The patient-name field
 // intentionally does NOT match the bare word "اسم" here, because many columns
 // contain it (اسم المديرية، اسم المركز، اسم الطبيب، اسم التخصص). Those are
 // resolved by their own strong keywords or excluded from the name fallback.
+// appointmentTime / arrivalDate are intentionally absent — exact match only.
 const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["nationalId", ["الهويه", "هويه", "السجلالمدني", "الرقمالمدني", "الاقامه", "nationalid", "identity", "iqama"]],
   ["specialty", ["التخصص", "تخصص", "العياده", "عياده", "specialty", "speciality", "clinic"]],
   ["doctor", ["الطبيب", "طبيب", "دكتور", "المعالج", "الممارس", "doctor", "physician"]],
   ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
-  // Arrival must precede appointmentDate: both headers contain "تاريخ".
-  ["arrivalDate", ["وصوالمراجع", "تاريخالوصول", "وقتالوصول", "الوصول", "وصول", "arrival"]],
-  // Strict: only appointment-start headers (بداية الموعد). Never "وقت الحجز".
-  ["appointmentTime", ["وقتبدايهالموعد", "وقتبدايهموعد", "بدايهالموعد", "بدايهموعد"]],
   ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
   ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
-
-/** Headers that must never be used for appointment start time. */
-const APPOINTMENT_TIME_EXCLUDE = ["حجز", "وصول", "booking"];
 
 // Generic name tokens used only as a last resort, guarded by exclusions so a
 // column like "اسم المديرية" is never mistaken for the patient name.
@@ -54,20 +60,32 @@ const NAME_EXCLUDE = [
   "القسم", "الملف", "المشروع", "الطبيب", "التخصص", "العياده", "الشركه", "وصول",
 ];
 
+function findExactHeader(headers: string[], label: string): string | undefined {
+  const target = normalize(label);
+  return headers.find((header) => normalize(header) === target);
+}
+
 export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
   const map: Partial<Record<Field, string>> = {};
   const used = new Set<string>();
-  const timeExclude = APPOINTMENT_TIME_EXCLUDE.map(normalize);
 
+  // 1) Exact header names first (وقت بداية الموعد, تاريخ وصول المراجع).
+  for (const [field, label] of EXACT_HEADERS) {
+    const header = findExactHeader(headers, label);
+    if (header) {
+      map[field] = header;
+      used.add(header);
+    }
+  }
+
+  // 2) Fuzzy keywords for the remaining fields.
   for (const [field, keywords] of FIELD_KEYWORDS) {
     const normalized = keywords.map(normalize);
     for (const header of headers) {
       if (used.has(header) || map[field]) continue;
       const h = normalize(header);
       if (!h) continue;
-      // Never map booking/arrival time columns to appointment start time.
-      if (field === "appointmentTime" && timeExclude.some((ex) => h.includes(ex))) continue;
-      // appointmentDate must not steal start-time or arrival columns.
+      // Do not let appointmentDate claim start-time / arrival columns.
       if (
         field === "appointmentDate" &&
         (h.includes(normalize("بداية")) ||
@@ -183,23 +201,40 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return { records: [], matchedColumns: {}, totalRows: 0 };
 
+  // Read header row directly so we can exact-match "وقت بداية الموعد"
+  // even when the first data row is sparse.
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
+    defval: "",
+    raw: false,
+  });
+  if (matrix.length === 0) return { records: [], matchedColumns: {}, totalRows: 0 };
+
+  const headerRow = (matrix[0] ?? []).map((h) => String(h ?? "").trim());
+  const headers = headerRow.filter((h) => h.length > 0);
+  const columnMap = mapColumns(headers);
+
   // raw:false keeps Excel's displayed values (e.g. "09:30" for time cells)
   // instead of Date objects that would otherwise become "1899-12-31".
   const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
     defval: "",
     raw: false,
   });
-  if (rows.length === 0) return { records: [], matchedColumns: {}, totalRows: 0 };
-
-  // Map each spreadsheet column header to one of our fields.
-  const headers = Object.keys(rows[0]);
-  const columnMap = mapColumns(headers);
+  if (rows.length === 0) return { records: [], matchedColumns: columnMap, totalRows: 0 };
 
   const records: PatientRecord[] = [];
   for (const row of rows) {
     const get = (field: Field, kind: "date" | "time" | "text" = "text"): string => {
       const header = columnMap[field];
-      return header ? cell(row[header], kind) : "";
+      if (!header) return "";
+      // Prefer the exact mapped header key; also try a normalised key lookup
+      // in case SheetJS altered whitespace on the object key.
+      if (Object.prototype.hasOwnProperty.call(row, header)) {
+        return cell(row[header], kind);
+      }
+      const target = normalize(header);
+      const key = Object.keys(row).find((k) => normalize(k) === target);
+      return key ? cell(row[key], kind) : "";
     };
     const name = get("name");
     const phone = normalizePhone(get("phone"));
@@ -215,6 +250,7 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
       name,
       nationalId,
       appointmentDate: get("appointmentDate", "date"),
+      // Bound exclusively via exact header "وقت بداية الموعد" in mapColumns.
       appointmentTime: get("appointmentTime", "time"),
       arrivalDate: get("arrivalDate", "date"),
       doctor: get("doctor"),

@@ -79,9 +79,25 @@ test("وقت الحجز alone does not map to appointment time", () => {
   assert.equal(map.appointmentTime, undefined);
 });
 
-test("وقت بداية موعد without ال still maps", () => {
+test("وقت بداية موعد without ال does not fuzzy-match", () => {
   const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية موعد"]);
-  assert.equal(map.appointmentTime, "وقت بداية موعد");
+  assert.equal(map.appointmentTime, undefined);
+});
+
+test("only exact وقت بداية الموعد maps to appointment time", () => {
+  const map = mapColumns([
+    "موعد الحجز",
+    "وقت الحجز",
+    "وقت الموعد",
+    "بداية الموعد",
+    "وقت بداية الموعد",
+  ]);
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("diacritics on exact وقت بداية الموعد still match", () => {
+  const map = mapColumns(["وقت الحجز", "وقت بِدَايَة المَوْعِد"]);
+  assert.equal(map.appointmentTime, "وقت بِدَايَة المَوْعِد");
 });
 
 test("English headers also map", () => {
