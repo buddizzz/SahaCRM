@@ -2,7 +2,14 @@ import type { Category, PatientRecord } from "./types";
 
 type Field = keyof Pick<
   PatientRecord,
-  "name" | "nationalId" | "appointmentDate" | "appointmentTime" | "doctor" | "specialty" | "phone"
+  | "name"
+  | "nationalId"
+  | "appointmentDate"
+  | "appointmentTime"
+  | "arrivalDate"
+  | "doctor"
+  | "specialty"
+  | "phone"
 >;
 
 /** Normalise an Arabic/English header for keyword matching. */
@@ -28,7 +35,10 @@ const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["specialty", ["التخصص", "تخصص", "العياده", "عياده", "specialty", "speciality", "clinic"]],
   ["doctor", ["الطبيب", "طبيب", "دكتور", "المعالج", "الممارس", "doctor", "physician"]],
   ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
-  ["appointmentTime", ["الوقت", "وقت", "الساعه", "ساعه", "زمن", "time"]],
+  // Arrival must precede appointmentDate: both headers contain "تاريخ".
+  ["arrivalDate", ["وصوالمراجع", "تاريخالوصول", "وقتالوصول", "الوصول", "وصول", "arrival"]],
+  // Prefer "وقت بداية الموعد" over generic booking-time labels.
+  ["appointmentTime", ["وقتبدايهالموعد", "بدايهالموعد", "الوقت", "وقت", "الساعه", "ساعه", "زمن", "time"]],
   ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
   ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
@@ -144,6 +154,7 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
       nationalId,
       appointmentDate: get("appointmentDate"),
       appointmentTime: get("appointmentTime"),
+      arrivalDate: get("arrivalDate"),
       doctor: get("doctor"),
       specialty: get("specialty"),
       phone,
