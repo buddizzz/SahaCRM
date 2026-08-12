@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapColumns, normalizePhone } from "./excel";
+import * as XLSX from "xlsx";
+import { cell, mapColumns, normalizePhone, parseExcelFile } from "./excel";
 
 test("patient name maps to اسم المراجع, not اسم المديرية", () => {
   const headers = [
@@ -78,6 +79,11 @@ test("وقت الحجز alone does not map to appointment time", () => {
   assert.equal(map.appointmentTime, undefined);
 });
 
+test("وقت بداية موعد without ال still maps", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية موعد"]);
+  assert.equal(map.appointmentTime, "وقت بداية موعد");
+});
+
 test("English headers also map", () => {
   const map = mapColumns(["Patient Name", "National ID", "Mobile", "Doctor", "Specialty"]);
   assert.equal(map.name, "Patient Name");
@@ -94,4 +100,55 @@ test("normalizePhone converts 9665… to 05…", () => {
   assert.equal(normalizePhone("966 5 1234 5678"), "0512345678");
   assert.equal(normalizePhone("0512345678"), "0512345678");
   assert.equal(normalizePhone(""), "");
+});
+
+test("cell formats Excel time serials as HH:mm, not 1899 dates", () => {
+  assert.equal(cell(0.3958333333, "time"), "09:30");
+  const localTime = new Date(1899, 11, 31, 9, 30, 0);
+  assert.equal(cell(localTime, "time"), "09:30");
+  assert.equal(cell(new Date(2026, 7, 12), "date"), "2026-08-12");
+});
+
+test("parseExcelFile reads وقت بداية الموعد, not وقت الحجز", async () => {
+  const headers = [
+    "اسم المراجع",
+    "رقم الهوية",
+    "موعد الحجز",
+    "وقت الحجز",
+    "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
+    "اسم الطبيب",
+    "اسم التخصص",
+    "رقم الجوال",
+  ];
+  const ws = XLSX.utils.aoa_to_sheet([
+    headers,
+    [
+      "محمد أحمد",
+      "1012345678",
+      "2026-08-12",
+      "08:00",
+      null,
+      "2026-08-12",
+      "د. سعاد",
+      "طب الأسرة",
+      "0501234567",
+    ],
+  ]);
+  // Real MOH exports store start time as an Excel time serial.
+  ws["E2"] = { t: "n", v: 0.3958333333, z: "hh:mm" };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "المراجعون");
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  const file = new File([buf], "patients.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const result = await parseExcelFile(file, "family");
+  assert.equal(result.matchedColumns.appointmentTime, "وقت بداية الموعد");
+  assert.notEqual(result.matchedColumns.appointmentTime, "وقت الحجز");
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].appointmentTime, "09:30");
+  assert.notEqual(result.records[0].appointmentTime, "08:00");
+  assert.equal(result.records[0].arrivalDate, "2026-08-12");
 });
