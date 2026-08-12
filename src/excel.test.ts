@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mapColumns } from "./excel";
+import * as XLSX from "xlsx";
+import { cell, mapColumns, normalizePhone, parseExcelFile } from "./excel";
 
 test("patient name maps to اسم المراجع, not اسم المديرية", () => {
   const headers = [
@@ -10,6 +11,7 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
     "رقم الهوية",
     "موعد الحجز",
     "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
     "اسم الطبيب",
     "اسم التخصص",
     "رقم الجوال",
@@ -19,6 +21,7 @@ test("patient name maps to اسم المراجع, not اسم المديرية", 
   assert.equal(map.nationalId, "رقم الهوية");
   assert.equal(map.appointmentDate, "موعد الحجز");
   assert.equal(map.appointmentTime, "وقت بداية الموعد");
+  assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
   assert.equal(map.doctor, "اسم الطبيب");
   assert.equal(map.specialty, "اسم التخصص");
   assert.equal(map.phone, "رقم الجوال");
@@ -45,24 +48,56 @@ test("handles diacritics, alef and ta-marbuta variations", () => {
   assert.equal(map.phone, "الجوّال");
 });
 
-test("appointment date still maps; near time headers do not steal it", () => {
-  const map = mapColumns(["تاريخ الموعد", "وقت الموعد"]);
+test("time is not misread as the appointment date", () => {
+  const map = mapColumns(["تاريخ الموعد", "وقت بداية الموعد"]);
   assert.equal(map.appointmentDate, "تاريخ الموعد");
-  // Time is exact-match only — "وقت الموعد" must not map.
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("arrival date is not mistaken for appointment date or patient name", () => {
+  const map = mapColumns([
+    "اسم المراجع",
+    "موعد الحجز",
+    "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
+  ]);
+  assert.equal(map.name, "اسم المراجع");
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+  assert.equal(map.arrivalDate, "تاريخ وصول المراجع");
+});
+
+test("وقت الحجز is never used as appointment start time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية الموعد"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
+
+test("وقت الحجز alone does not map to appointment time", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز"]);
+  assert.equal(map.appointmentDate, "موعد الحجز");
   assert.equal(map.appointmentTime, undefined);
 });
 
-test("appointmentTime only matches the exact header وقت بداية الموعد", () => {
-  const exact = mapColumns(["وقت بداية الموعد", "موعد الحجز"]);
-  assert.equal(exact.appointmentTime, "وقت بداية الموعد");
+test("وقت بداية موعد without ال does not fuzzy-match", () => {
+  const map = mapColumns(["موعد الحجز", "وقت الحجز", "وقت بداية موعد"]);
+  assert.equal(map.appointmentTime, undefined);
+});
 
-  // Near variants and older labels must not match.
-  const near = mapColumns(["وقت الحجز", "وقت الموعد", "الوقت", "وقت", "Appointment Time", "time"]);
-  assert.equal(near.appointmentTime, undefined);
+test("only exact وقت بداية الموعد maps to appointment time", () => {
+  const map = mapColumns([
+    "موعد الحجز",
+    "وقت الحجز",
+    "وقت الموعد",
+    "بداية الموعد",
+    "وقت بداية الموعد",
+  ]);
+  assert.equal(map.appointmentTime, "وقت بداية الموعد");
+});
 
-  // Extra spaces / different wording must not match.
-  const spaced = mapColumns(["وقت  بداية  الموعد", "وقت بداية الموعد "]);
-  assert.equal(spaced.appointmentTime, undefined);
+test("diacritics on exact وقت بداية الموعد still match", () => {
+  const map = mapColumns(["وقت الحجز", "وقت بِدَايَة المَوْعِد"]);
+  assert.equal(map.appointmentTime, "وقت بِدَايَة المَوْعِد");
 });
 
 test("English headers also map", () => {
@@ -72,4 +107,64 @@ test("English headers also map", () => {
   assert.equal(map.phone, "Mobile");
   assert.equal(map.doctor, "Doctor");
   assert.equal(map.specialty, "Specialty");
+});
+
+test("normalizePhone converts 9665… to 05…", () => {
+  assert.equal(normalizePhone("966512345678"), "0512345678");
+  assert.equal(normalizePhone("+966512345678"), "0512345678");
+  assert.equal(normalizePhone("00966512345678"), "0512345678");
+  assert.equal(normalizePhone("966 5 1234 5678"), "0512345678");
+  assert.equal(normalizePhone("0512345678"), "0512345678");
+  assert.equal(normalizePhone(""), "");
+});
+
+test("cell formats Excel time serials as HH:mm, not 1899 dates", () => {
+  assert.equal(cell(0.3958333333, "time"), "09:30");
+  const localTime = new Date(1899, 11, 31, 9, 30, 0);
+  assert.equal(cell(localTime, "time"), "09:30");
+  assert.equal(cell(new Date(2026, 7, 12), "date"), "2026-08-12");
+});
+
+test("parseExcelFile reads وقت بداية الموعد, not وقت الحجز", async () => {
+  const headers = [
+    "اسم المراجع",
+    "رقم الهوية",
+    "موعد الحجز",
+    "وقت الحجز",
+    "وقت بداية الموعد",
+    "تاريخ وصول المراجع",
+    "اسم الطبيب",
+    "اسم التخصص",
+    "رقم الجوال",
+  ];
+  const ws = XLSX.utils.aoa_to_sheet([
+    headers,
+    [
+      "محمد أحمد",
+      "1012345678",
+      "2026-08-12",
+      "08:00",
+      null,
+      "2026-08-12",
+      "د. سعاد",
+      "طب الأسرة",
+      "0501234567",
+    ],
+  ]);
+  // Real MOH exports store start time as an Excel time serial.
+  ws["E2"] = { t: "n", v: 0.3958333333, z: "hh:mm" };
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "المراجعون");
+  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  const file = new File([buf], "patients.xlsx", {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const result = await parseExcelFile(file, "family");
+  assert.equal(result.matchedColumns.appointmentTime, "وقت بداية الموعد");
+  assert.notEqual(result.matchedColumns.appointmentTime, "وقت الحجز");
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].appointmentTime, "09:30");
+  assert.notEqual(result.records[0].appointmentTime, "08:00");
+  assert.equal(result.records[0].arrivalDate, "2026-08-12");
 });

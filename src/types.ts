@@ -9,6 +9,7 @@ export interface PatientRecord {
   nationalId: string;
   appointmentDate: string;
   appointmentTime: string;
+  arrivalDate: string;
   doctor: string;
   specialty: string;
   phone: string;
