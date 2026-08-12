@@ -37,30 +37,46 @@ const FIELD_KEYWORDS: Array<[Field, string[]]> = [
   ["phone", ["الجوال", "جوال", "اتصال", "هاتف", "تلفون", "تواصل", "موبايل", "واتس", "phone", "mobile", "tel", "contact", "whatsapp"]],
   // Arrival must precede appointmentDate: both headers contain "تاريخ".
   ["arrivalDate", ["وصوالمراجع", "تاريخالوصول", "وقتالوصول", "الوصول", "وصول", "arrival"]],
-  // Only "وقت بداية الموعد" — never the booking column "وقت الحجز".
-  ["appointmentTime", ["وقتبدايهالموعد", "بدايهالموعد"]],
+  // Strict: only appointment-start headers (بداية الموعد). Never "وقت الحجز".
+  ["appointmentTime", ["وقتبدايهالموعد", "وقتبدايهموعد", "بدايهالموعد", "بدايهموعد"]],
   ["appointmentDate", ["التاريخ", "تاريخ", "موعد", "اليوم", "date", "appointment"]],
   ["name", ["اسمالمراجع", "المراجع", "مراجع", "المريض", "مريض", "المستفيد", "مستفيد", "patient", "beneficiary"]],
 ];
+
+/** Headers that must never be used for appointment start time. */
+const APPOINTMENT_TIME_EXCLUDE = ["حجز", "وصول", "booking"];
 
 // Generic name tokens used only as a last resort, guarded by exclusions so a
 // column like "اسم المديرية" is never mistaken for the patient name.
 const NAME_FALLBACK = ["الاسمالرباعي", "الاسمالكامل", "الاسم", "اسم", "fullname", "name"];
 const NAME_EXCLUDE = [
   "مديريه", "مركز", "قطاع", "مستشفى", "مستشفي", "خدمه", "نوع", "الجهه", "الاداره",
-  "القسم", "الملف", "المشروع", "الطبيب", "التخصص", "العياده", "الشركه",
+  "القسم", "الملف", "المشروع", "الطبيب", "التخصص", "العياده", "الشركه", "وصول",
 ];
 
 export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
   const map: Partial<Record<Field, string>> = {};
   const used = new Set<string>();
+  const timeExclude = APPOINTMENT_TIME_EXCLUDE.map(normalize);
 
   for (const [field, keywords] of FIELD_KEYWORDS) {
     const normalized = keywords.map(normalize);
     for (const header of headers) {
       if (used.has(header) || map[field]) continue;
       const h = normalize(header);
-      if (h && normalized.some((kw) => h.includes(kw))) {
+      if (!h) continue;
+      // Never map booking/arrival time columns to appointment start time.
+      if (field === "appointmentTime" && timeExclude.some((ex) => h.includes(ex))) continue;
+      // appointmentDate must not steal start-time or arrival columns.
+      if (
+        field === "appointmentDate" &&
+        (h.includes(normalize("بداية")) ||
+          h.includes(normalize("وصول")) ||
+          h.includes(normalize("وقت")))
+      ) {
+        continue;
+      }
+      if (normalized.some((kw) => h.includes(kw))) {
         map[field] = header;
         used.add(header);
         break;
@@ -86,9 +102,50 @@ export function mapColumns(headers: string[]): Partial<Record<Field, string>> {
   return map;
 }
 
-function cell(value: unknown): string {
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Format an Excel time fraction (0–1) or Date as HH:mm. */
+function formatTimeValue(value: Date | number): string {
+  if (typeof value === "number") {
+    const totalMinutes = Math.round((value % 1) * 24 * 60);
+    const hours = Math.floor(totalMinutes / 60) % 24;
+    const minutes = totalMinutes % 60;
+    return `${pad2(hours)}:${pad2(minutes)}`;
+  }
+  return `${pad2(value.getHours())}:${pad2(value.getMinutes())}`;
+}
+
+function formatDateValue(value: Date): string {
+  return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+}
+
+/**
+ * Convert a spreadsheet cell to display text.
+ * Excel time-only serials become Date objects near 1899/1900 — those must show
+ * as HH:mm, not as a bogus calendar date like 1899-12-31.
+ */
+export function cell(value: unknown, kind: "date" | "time" | "text" = "text"): string {
   if (value === null || value === undefined) return "";
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+
+  if (typeof value === "number") {
+    if (kind === "time" && value >= 0 && value < 1) return formatTimeValue(value);
+    return String(value);
+  }
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const excelEpoch = value.getFullYear() < 1901;
+    if (kind === "time" || excelEpoch) return formatTimeValue(value);
+    if (kind === "date") return formatDateValue(value);
+    const hasTime =
+      value.getHours() !== 0 || value.getMinutes() !== 0 || value.getSeconds() !== 0;
+    return hasTime
+      ? `${formatDateValue(value)} ${formatTimeValue(value)}`
+      : formatDateValue(value);
+  }
+
   return String(value).trim();
 }
 
@@ -126,7 +183,12 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   if (!sheet) return { records: [], matchedColumns: {}, totalRows: 0 };
 
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+  // raw:false keeps Excel's displayed values (e.g. "09:30" for time cells)
+  // instead of Date objects that would otherwise become "1899-12-31".
+  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+    defval: "",
+    raw: false,
+  });
   if (rows.length === 0) return { records: [], matchedColumns: {}, totalRows: 0 };
 
   // Map each spreadsheet column header to one of our fields.
@@ -135,9 +197,9 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
 
   const records: PatientRecord[] = [];
   for (const row of rows) {
-    const get = (field: Field): string => {
+    const get = (field: Field, kind: "date" | "time" | "text" = "text"): string => {
       const header = columnMap[field];
-      return header ? cell(row[header]) : "";
+      return header ? cell(row[header], kind) : "";
     };
     const name = get("name");
     const phone = normalizePhone(get("phone"));
@@ -152,9 +214,9 @@ export async function parseExcelFile(file: File, category: Category): Promise<Pa
       category,
       name,
       nationalId,
-      appointmentDate: get("appointmentDate"),
-      appointmentTime: get("appointmentTime"),
-      arrivalDate: get("arrivalDate"),
+      appointmentDate: get("appointmentDate", "date"),
+      appointmentTime: get("appointmentTime", "time"),
+      arrivalDate: get("arrivalDate", "date"),
       doctor: get("doctor"),
       specialty: get("specialty"),
       phone,
